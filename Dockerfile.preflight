@@ -1,0 +1,58 @@
+# Dockerfile for 3DGS Preflight Check
+#
+# Lightweight container that detects GPU capabilities and validates
+# the environment before long-running training jobs.
+#
+# Build:
+#   docker build -f Dockerfile.preflight -t 3dgs-preflight:latest .
+#
+# Run (detect only):
+#   docker run --rm --gpus all 3dgs-preflight
+#
+# Run (assert a specific backend):
+#   docker run --rm --gpus all 3dgs-preflight --expect gsplat
+#   docker run --rm --gpus all -e BACKEND=gsplat 3dgs-preflight
+#
+# Exit codes: 0 = pass, 1 = fail
+
+# ============================================================================
+# Stage 1: Build the preflight binary
+# ============================================================================
+FROM rust:1.93-bookworm AS builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+RUN cargo build --release --locked --bin 3dgs-preflight && \
+    strip target/release/3dgs-preflight
+
+# ============================================================================
+# Stage 2: Minimal runtime with GPU detection tools
+# ============================================================================
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install only what the preflight check needs to probe the environment
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    python3 \
+    python3-venv \
+    libpython3.12 \
+    ffmpeg \
+    colmap \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the preflight binary
+COPY --from=builder /build/target/release/3dgs-preflight /usr/local/bin/3dgs-preflight
+RUN chmod +x /usr/local/bin/3dgs-preflight
+
+ENTRYPOINT ["/usr/local/bin/3dgs-preflight"]

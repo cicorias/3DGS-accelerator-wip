@@ -318,3 +318,4 @@ podman run --rm \
 - [Deployment Guide](DEPLOYMENT.md) - Cloud deployment
 - [User Guide](USER_GUIDE.md) - Running the processor
 - [Docker Validation](DOCKER_VALIDATION.md) - Testing procedures
+- [Preflight Check](PREFLIGHT.md) - Pre-training GPU & environment validation (`Dockerfile.preflight`)
