@@ -8,6 +8,10 @@ rust-version = "1.93"
 name = "3dgs-processor"
 path = "src/main.rs"
 
+[[bin]]
+name = "3dgs-preflight"
+path = "src/bin/preflight.rs"
+
 [lib]
 name = "three_dgs_processor"
 path = "src/lib.rs"

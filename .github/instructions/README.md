@@ -29,6 +29,16 @@ AI agent guidance files for the 3DGS Video Processor project.
 - COLMAP performance tuning (matcher, features, resolution)
 - Common failure modes and fixes
 
+## Key Documentation
+
+### [docs/PREFLIGHT.md](../../docs/PREFLIGHT.md)
+**Preflight GPU & backend environment check**
+- Standalone `3dgs-preflight` binary and `Dockerfile.preflight` container
+- GPU detection (CUDA, Metal, ROCm) with device/VRAM reporting
+- `--expect <backend>` assertion with numbered failure reasons
+- External tool probing (nvidia-smi, python3, ffmpeg, colmap, gsplat)
+- CI/CD integration examples
+
 ## How They Work Together
 
 ```text

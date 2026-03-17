@@ -20,6 +20,17 @@ pub enum GpuPlatform {
     None,
 }
 
+impl std::fmt::Display for GpuPlatform {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GpuPlatform::Cuda => write!(f, "CUDA"),
+            GpuPlatform::Metal => write!(f, "Metal"),
+            GpuPlatform::Rocm => write!(f, "ROCm"),
+            GpuPlatform::None => write!(f, "None (CPU-only)"),
+        }
+    }
+}
+
 /// GPU detection result
 #[derive(Debug, Clone)]
 pub struct GpuInfo {

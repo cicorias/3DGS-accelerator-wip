@@ -57,6 +57,14 @@ jobs:
           ./scripts/generate-test-videos.sh
           ls -lh testdata/sample_scene/
       
+      - name: Build release binaries
+        run: cargo build --release --bin 3dgs-processor --bin 3dgs-preflight
+
+      - name: Run preflight check
+        run: ./target/release/3dgs-preflight --expect mock
+        env:
+          FORCE_CPU_BACKEND: "1"
+
       - name: Build Docker image
         run: |
           docker build -t 3dgs-processor:test .
@@ -142,5 +150,16 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: false
           tags: 3dgs-processor:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build preflight image (test only)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.preflight
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: 3dgs-preflight:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
