@@ -13,8 +13,8 @@
 #   IMAGE_TAG        — Tag suffix (default: latest)
 #   REGISTRY         — Registry prefix, e.g. myacr.azurecr.io (default: none)
 #   CUDA_ARCHITECTURES — Semicolon-separated SM codes (default: "75;80;86;89;90")
-#   CUDA_VERSION     — CUDA toolkit version (default: 12.4.1)
-#   PYTORCH_CUDA_TAG — PyTorch wheel suffix (default: cu124)
+#   CUDA_VERSION     — CUDA toolkit version (default: 12.6.3)
+#   PYTORCH_CUDA_TAG — PyTorch wheel suffix (default: cu126)
 #   COLMAP_VERSION   — COLMAP git tag (default: 3.11.1)
 
 set -euo pipefail
@@ -67,18 +67,17 @@ tag_name() {
 }
 
 build_image() {
-    local dockerfile="$1"
+    local target="$1"
     local tag="$2"
     shift 2
     local extra_args=("$@")
 
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "Building: ${tag}"
-    echo "Dockerfile: ${dockerfile}"
+    echo "Building: ${tag}  (--target ${target})"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-    local cmd=(docker buildx build -f "${dockerfile}" -t "${tag}")
+    local cmd=(docker buildx build --target "${target}" -t "${tag}")
 
     if [[ "${PUSH}" == "true" ]]; then
         cmd+=(--push)
@@ -116,8 +115,7 @@ BUILT_TAGS=()
 # ── CPU image ───────────────────────────────────────────────────────────────
 if [[ "${BUILD_CPU}" == "true" ]]; then
     CPU_TAG=$(tag_name "cpu-${IMAGE_TAG}")
-    # Also tag as :latest when building both (CPU is the safe default)
-    build_image "Dockerfile" "${CPU_TAG}" \
+    build_image "cpu" "${CPU_TAG}" \
         --platform linux/amd64
     BUILT_TAGS+=("${CPU_TAG}")
 fi
@@ -125,7 +123,7 @@ fi
 # ── GPU image ───────────────────────────────────────────────────────────────
 if [[ "${BUILD_GPU}" == "true" ]]; then
     GPU_TAG=$(tag_name "gpu-${IMAGE_TAG}")
-    build_image "Dockerfile.gpu" "${GPU_TAG}" \
+    build_image "gpu" "${GPU_TAG}" \
         --platform linux/amd64 \
         --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
         --build-arg "CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES}" \
@@ -134,11 +132,20 @@ if [[ "${BUILD_GPU}" == "true" ]]; then
     BUILT_TAGS+=("${GPU_TAG}")
 fi
 
-# ── Preflight image (always built — uses NVIDIA base for GPU detection) ─────
+# ── Preflight image (separate Dockerfile, uses NVIDIA base for GPU detection) ─
 PREFLIGHT_TAG=$(tag_name "preflight-${IMAGE_TAG}")
-build_image "Dockerfile.preflight" "${PREFLIGHT_TAG}" \
-    --platform linux/amd64 \
-    --build-arg "CUDA_VERSION=${CUDA_VERSION}"
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Building: ${PREFLIGHT_TAG}  (Dockerfile.preflight)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+PF_CMD=(docker buildx build -f Dockerfile.preflight -t "${PREFLIGHT_TAG}" --platform linux/amd64 --build-arg "CUDA_VERSION=${CUDA_VERSION}")
+if [[ "${PUSH}" == "true" ]]; then PF_CMD+=(--push); elif [[ "${LOAD}" == "true" ]]; then PF_CMD+=(--load); fi
+PF_CMD+=(.)
+echo "→ ${PF_CMD[*]}"
+"${PF_CMD[@]}"
+echo "✅ ${PREFLIGHT_TAG} built successfully"
 BUILT_TAGS+=("${PREFLIGHT_TAG}")
 
 # ── Summary ─────────────────────────────────────────────────────────────────

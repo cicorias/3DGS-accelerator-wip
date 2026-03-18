@@ -66,9 +66,9 @@ jobs:
           FORCE_CPU_BACKEND: "1"
           COLMAP_USE_CPU: "1"
 
-      - name: Build Docker image
+      - name: Build Docker image (CPU target)
         run: |
-          docker build -t 3dgs-processor:test .
+          docker build --target cpu -t 3dgs-processor:test .
       
       - name: Run E2E tests
         run: |

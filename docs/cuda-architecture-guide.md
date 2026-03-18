@@ -3,7 +3,7 @@
 This document maps NVIDIA CUDA compute capability codes (`CMAKE_CUDA_ARCHITECTURES`)
 to GPU hardware, and then to Azure VM SKUs and Azure Container Apps GPU workload
 profiles. Use this when choosing which `CUDA_ARCHITECTURES` build-arg to pass to
-`Dockerfile.gpu`.
+the `gpu` target in `Dockerfile`.
 
 ## Quick Reference
 
@@ -11,10 +11,10 @@ When building the GPU Docker image, specify the target architectures:
 
 ```bash
 # Single GPU target (smallest/fastest build):
-docker build -f Dockerfile.gpu --build-arg CUDA_ARCHITECTURES="75" -t 3dgs-processor:gpu-t4 .
+docker build --target gpu --build-arg CUDA_ARCHITECTURES="75" -t 3dgs-processor:gpu-t4 .
 
 # Multi-GPU support (covers T4 through H100):
-docker build -f Dockerfile.gpu --build-arg CUDA_ARCHITECTURES="75;80;86;89;90" -t 3dgs-processor:gpu .
+docker build --target gpu --build-arg CUDA_ARCHITECTURES="75;80;86;89;90" -t 3dgs-processor:gpu .
 ```
 
 > **Tip:** Fewer architectures = faster build and smaller binary. Target only what you deploy to.
@@ -97,7 +97,7 @@ Azure Container Apps currently offers **serverless GPU** via Consumption-GPU pro
 ### Minimal — Azure Container Apps T4 Only
 
 ```bash
-docker build -f Dockerfile.gpu \
+docker build --target gpu \
   --build-arg CUDA_ARCHITECTURES="75" \
   -t 3dgs-processor:gpu-t4 .
 ```
@@ -107,7 +107,7 @@ Smallest binary, fastest build. Use this for Container Apps deployments.
 ### Standard — T4 + A100 (Most Azure VMs)
 
 ```bash
-docker build -f Dockerfile.gpu \
+docker build --target gpu \
   --build-arg CUDA_ARCHITECTURES="75;80" \
   -t 3dgs-processor:gpu .
 ```
@@ -117,7 +117,7 @@ Covers the two most common Azure GPU SKUs.
 ### Broad — All Current Architectures
 
 ```bash
-docker build -f Dockerfile.gpu \
+docker build --target gpu \
   --build-arg CUDA_ARCHITECTURES="75;80;86;89;90" \
   -t 3dgs-processor:gpu-all .
 ```

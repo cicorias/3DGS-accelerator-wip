@@ -56,6 +56,9 @@ if [ "${PUSH}" = "false" ]; then
     echo "To run the container:"
     echo "  docker run --rm ${IMAGE_NAME}:${IMAGE_TAG}"
     echo ""
+    echo "To build GPU variant:"
+    echo "  docker buildx build --target gpu --platform linux/amd64 --load -t ${IMAGE_NAME}:gpu ."
+    echo ""
     echo "To build for multiple architectures and push:"
     echo "  PUSH=true ./docker-build.sh"
 fi
