@@ -1,6 +1,12 @@
-# Multi-stage Dockerfile for 3DGS Video Processor
-# Optimized for small image size using Docker best practices
-# Supports multi-arch builds (linux/amd64 and linux/arm64)
+# Multi-stage Dockerfile for 3DGS Video Processor — CPU-only variant
+#
+# This builds a lightweight image using Ubuntu's apt-installed COLMAP (CPU-only)
+# and CPU-only PyTorch. It supports multi-arch (linux/amd64, linux/arm64).
+#
+# For GPU/CUDA support (Azure Container Apps GPU, headless NVIDIA hosts),
+# use Dockerfile.gpu instead — it builds COLMAP from source with CUDA and
+# installs CUDA-enabled PyTorch.
+#
 # Build with: docker buildx build --platform linux/amd64,linux/arm64 -t 3dgs-processor:latest .
 
 # ============================================================================

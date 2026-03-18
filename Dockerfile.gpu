@@ -1,0 +1,227 @@
+# Multi-stage Dockerfile for 3DGS Video Processor — GPU variant
+#
+# Builds a CUDA-enabled image with:
+#   - COLMAP compiled from source (CUDA SIFT, no OpenGL/GUI)
+#   - PyTorch with CUDA support for gsplat
+#   - NVIDIA CUDA runtime base image
+#
+# This image is required for Azure Container Apps serverless GPU and any
+# headless GPU environment without X11/GLX.
+#
+# Build args:
+#   CUDA_VERSION        — CUDA toolkit version (default: 12.6.3)
+#   COLMAP_VERSION      — COLMAP git tag to build (default: 3.11.1)
+#   CUDA_ARCHITECTURES  — semicolon-separated SM codes (default: "75;80;86;89;90")
+#                         See docs/cuda-architecture-guide.md for the full mapping.
+#   PYTORCH_CUDA_TAG    — PyTorch wheel index suffix (default: cu126)
+#
+# Build:
+#   docker build -f Dockerfile.gpu -t 3dgs-processor:gpu .
+#
+# Build for a specific GPU (e.g. T4 only — smaller/faster):
+#   docker build -f Dockerfile.gpu --build-arg CUDA_ARCHITECTURES="75" -t 3dgs-processor:gpu-t4 .
+#
+# Run on Azure Container Apps GPU or any headless NVIDIA host:
+#   docker run --gpus all -e BACKEND=gsplat 3dgs-processor:gpu
+
+# ============================================================================
+# Build args (override at build time with --build-arg)
+# ============================================================================
+ARG CUDA_VERSION=12.6.3
+ARG COLMAP_VERSION=3.11.1
+ARG CUDA_ARCHITECTURES="75;80;86;89;90"
+ARG PYTORCH_CUDA_TAG=cu126
+
+# ============================================================================
+# Stage 1: Rust build (same as CPU Dockerfile)
+# ============================================================================
+FROM rust:1.93-bookworm AS builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+RUN cargo build --release --locked && \
+    strip target/release/3dgs-processor
+
+# ============================================================================
+# Stage 2: Python environment with CUDA-enabled PyTorch + gsplat
+# ============================================================================
+FROM python:3.12-slim-bookworm AS python-builder
+
+ARG PYTORCH_CUDA_TAG
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install CUDA-enabled PyTorch (matches the CUDA version in the base image)
+RUN pip install --no-cache-dir \
+    torch torchvision --index-url https://download.pytorch.org/whl/${PYTORCH_CUDA_TAG} && \
+    pip install --no-cache-dir \
+    gsplat \
+    numpy
+
+# ============================================================================
+# Stage 3: Build COLMAP from source with CUDA, no OpenGL/GUI
+# ============================================================================
+ARG CUDA_VERSION
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04 AS colmap-builder
+
+ARG COLMAP_VERSION
+ARG CUDA_ARCHITECTURES
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git cmake ninja-build build-essential \
+    libboost-program-options-dev libboost-graph-dev \
+    libboost-system-dev libeigen3-dev \
+    libgoogle-glog-dev libgtest-dev \
+    libsqlite3-dev libceres-dev \
+    libflann-dev libfreeimage-dev \
+    libsuitesparse-dev libmetis-dev \
+    libcgal-dev \
+    # Minimal OpenGL/EGL/GLEW stubs — COLMAP cmake probes for them even with OPENGL_ENABLED=OFF
+    libegl-dev libopengl-dev libglew-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch ${COLMAP_VERSION} \
+    https://github.com/colmap/colmap.git /colmap
+
+WORKDIR /colmap
+
+RUN cmake -B build -GNinja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCUDA_ENABLED=ON \
+      -DGUI_ENABLED=OFF \
+      -DOPENGL_ENABLED=OFF \
+      -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
+    && cmake --build build --config Release -j"$(nproc)" \
+    && cmake --install build --prefix /colmap-install
+
+# ============================================================================
+# Stage 4: Final runtime image (NVIDIA CUDA runtime)
+# ============================================================================
+ARG CUDA_VERSION
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+# Install runtime dependencies (no apt COLMAP — we built it from source)
+RUN apt-get update && \
+    ARCH=$(dpkg --print-architecture) && \
+    # Enable universe repo (needed for COLMAP runtime deps on NVIDIA base)
+    apt-get install -y --no-install-recommends software-properties-common && \
+    add-apt-repository -y universe && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+        lsb-release && \
+    # Add Microsoft repository for Blobfuse2
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | \
+        gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg && \
+    echo "deb [arch=${ARCH} signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/repos/microsoft-ubuntu-noble-prod noble main" | \
+        tee /etc/apt/sources.list.d/microsoft.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        # FFmpeg for frame extraction and metadata
+        ffmpeg \
+        # Python runtime for gsplat backend
+        python3 \
+        python3-venv \
+        libpython3.12 \
+        # COLMAP runtime shared-library dependencies
+        libboost-program-options1.83.0 \
+        libboost-graph1.83.0 \
+        libceres4t64 \
+        libflann1.9 \
+        libfreeimage3 \
+        libsqlite3-0 \
+        libgoogle-glog0v6t64 \
+        libsuitesparseconfig7 \
+        # OpenGL/GLEW runtime libs — COLMAP's SiftGPU links against them
+        # even when built with -DOPENGL_ENABLED=OFF (known COLMAP 3.11 behavior)
+        libopengl0 libglew2.2 libglx0 libgl1 \
+        # METIS graph partitioning (COLMAP sparse solver dependency)
+        libmetis5 \
+        # FUSE for Azure Blob Storage mounting
+        fuse3 \
+        libfuse3-3 && \
+    # Install blobfuse2 only on amd64
+    if [ "$ARCH" = "amd64" ]; then \
+        apt-get install -y --no-install-recommends blobfuse2 || true; \
+    fi && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
+    ffmpeg -version > /dev/null
+
+# Copy COLMAP built from source (CUDA-enabled, no OpenGL)
+COPY --from=colmap-builder /colmap-install /usr/local
+
+# Update shared library cache and verify COLMAP
+RUN ldconfig && colmap help > /dev/null 2>&1
+
+# Copy Python virtual environment with CUDA-enabled gsplat
+COPY --from=python-builder /opt/venv /opt/venv
+
+# Fix venv Python symlinks to point to system Python 3.12
+RUN cd /opt/venv/bin && \
+    rm -f python python3 python3.12 && \
+    ln -s /usr/bin/python3.12 python3.12 && \
+    ln -s python3.12 python3 && \
+    ln -s python3 python && \
+    /opt/venv/bin/python --version
+
+# Copy compiled Rust binary
+COPY --from=builder /build/target/release/3dgs-processor /usr/local/bin/3dgs-processor
+
+# Copy gsplat training script
+COPY scripts/gsplat_train.py /app/scripts/gsplat_train.py
+
+# Copy Azure mounting helper script
+COPY scripts/mount-azure.sh /usr/local/bin/mount-azure.sh
+
+# Create directories and set permissions
+RUN mkdir -p /config /tmp/3dgs-work /tmp/blobfuse-cache /tmp/blobfuse-configs && \
+    chmod +x /usr/local/bin/mount-azure.sh /usr/local/bin/3dgs-processor
+
+# Copy example config
+COPY config.example.yaml /config/config.example.yaml
+
+# Environment variables
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    LOG_LEVEL=info \
+    TEMP_PATH=/tmp/3dgs-work \
+    CONFIG_PATH=/config/config.yaml \
+    UPLOAD_STABILITY_TIMEOUT_SECS=60 \
+    MAX_RETRIES=3 \
+    POLL_INTERVAL_SECS=10 \
+    BACKEND=gsplat \
+    GSPLAT_PYTHON=/opt/venv/bin/python \
+    GSPLAT_BIN=/app/scripts/gsplat_train.py \
+    RETENTION_DAYS=30
+
+# NVIDIA runtime environment — lets the container discover host GPU drivers
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    QT_QPA_PLATFORM=offscreen
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD pgrep -f 3dgs-processor || exit 1
+
+ENTRYPOINT ["/usr/local/bin/3dgs-processor"]
