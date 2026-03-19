@@ -10,6 +10,7 @@ version: '3.8'
 # mkdir -p ./output/data/input/my_scene && cp testdata/sample_scene/view*.mp4 ./output/data/input/my_scene 
 
 services:
+  # CPU-only variant (default) — uses apt-installed COLMAP, CPU PyTorch
   3dgs-processor:
     image: 3dgs-processor:latest
     container_name: 3dgs-processor
@@ -24,7 +25,7 @@ services:
       OUTPUT_PATH: /data/output
       PROCESSED_PATH: /data/processed
       ERROR_PATH: /data/error
-      BACKEND: gaussian-splatting
+      BACKEND: mock
       TEMP_PATH: /tmp/3dgs-work
       LOG_LEVEL: debug
       HEALTH_CHECK_ENABLED: "true"
@@ -33,6 +34,46 @@ services:
       MAX_RETRIES: 1
     ports:
       - "8080:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # GPU variant — CUDA COLMAP, CUDA PyTorch, requires NVIDIA runtime
+  # Start with: docker compose --profile gpu up 3dgs-processor-gpu
+  3dgs-processor-gpu:
+    image: 3dgs-processor:gpu-latest
+    container_name: 3dgs-processor-gpu
+    profiles: ["gpu"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ./output/data:/data
+      - ./container-test/config.1.yaml:/app/config.yaml:ro
+      - ./output/tmp:/tmp/3dgs-work
+    environment:
+      CONFIG_PATH: /app/config.yaml
+      INPUT_PATH: /data/input
+      OUTPUT_PATH: /data/output
+      PROCESSED_PATH: /data/processed
+      ERROR_PATH: /data/error
+      BACKEND: gsplat
+      TEMP_PATH: /tmp/3dgs-work
+      LOG_LEVEL: debug
+      HEALTH_CHECK_ENABLED: "true"
+      HEALTH_CHECK_PORT: 8080
+      UPLOAD_STABILITY_TIMEOUT_SECS: 5
+      MAX_RETRIES: 1
+      NVIDIA_VISIBLE_DEVICES: all
+    ports:
+      - "8081:8080"
     logging:
       driver: json-file
       options:
